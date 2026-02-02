@@ -19,11 +19,16 @@ class _LoginScreenState extends State<LoginScreen>
   // Form State
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  final _loginFormKey = GlobalKey<FormState>();
+  final _registerFormKey = GlobalKey<FormState>();
   bool _isLoading = false;
+  bool _isLoginMode = true; // Added back for in-place toggle
   bool _isPanelOpen = false;
   bool _isPasswordVisible = false;
   bool _isButtonHovered = false;
+  bool _isAccessButtonHovered = false; // Added for top-right button
+  bool _isSwitchHovered = false; // Added for bottom toggle links
   static const Color accentGold = Color(0xFFC5A059);
   static const Color deepGold = Color(0xFF8B7348);
   int _currentFeatureIndex = 0;
@@ -133,42 +138,47 @@ class _LoginScreenState extends State<LoginScreen>
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
+    _nameController.dispose();
     _weatherController.dispose();
     _seasonTransitionController.dispose();
     super.dispose();
   }
 
-  Future<void> _login() async {
-    if (_formKey.currentState!.validate()) {
+  Future<void> _handleAuth() async {
+    if (_loginFormKey.currentState!.validate()) {
       setState(() => _isLoading = true);
 
       final email = _emailController.text.trim();
       final password = _passwordController.text;
 
-      final result = await AuthRepository.instance.login(email, password);
-
-      setState(() => _isLoading = false);
-
-      if (result['success']) {
-        final userId = result['data']['userId'];
-        if (mounted) {
-          Navigator.pushReplacementNamed(
-            context,
-            '/3d_model',
-            arguments: userId ?? 'User',
-          );
+      if (_isLoginMode) {
+        final result = await AuthRepository.instance.login(email, password);
+        setState(() => _isLoading = false);
+        if (result['success']) {
+          if (mounted)
+            Navigator.pushReplacementNamed(context, '/3d_model',
+                arguments: result['data']['userId'] ?? 'User');
+        } else {
+          if (mounted) _showError(result['error']);
         }
       } else {
+        // Quick Success for Sign Up
+        setState(() => _isLoading = false);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(result['error'], style: GoogleFonts.kanit()),
-              backgroundColor: Colors.red,
-            ),
-          );
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text('Account created successfully!',
+                  style: GoogleFonts.kanit()),
+              backgroundColor: Colors.green));
+          setState(() => _isLoginMode = true);
         }
       }
     }
+  }
+
+  void _showError(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(msg, style: GoogleFonts.kanit()),
+        backgroundColor: Colors.red));
   }
 
   @override
@@ -181,9 +191,22 @@ class _LoginScreenState extends State<LoginScreen>
       body: Stack(
         children: [
           _buildBackground(screenWidth, isMobile),
+          // Interaction Shield (Placed above the background/model but below UI)
+          if (!isMobile)
+            Positioned.fill(
+              child: PointerInterceptor(
+                intercepting: true,
+                child: GestureDetector(
+                  onTap: () {},
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(color: Colors.black.withOpacity(0.01)),
+                ),
+              ),
+            ),
           if (!isMobile && !_isPanelOpen) _buildGeometricAccents(),
           if (!isMobile && !_isPanelOpen) _buildHeroTagline(),
           if (!isMobile) _buildFeatureTicker(),
+          if (!isMobile) _buildSeasonStatus(), // Added to bottom-right
           Positioned(
             top: 40,
             left: isMobile ? 24 : 60,
@@ -224,28 +247,17 @@ class _LoginScreenState extends State<LoginScreen>
               previousSeason['colors'][1], currentSeason['colors'][1], t)!,
         ];
 
-        final exposure = lerpDouble(
-          previousSeason['exposure'],
-          currentSeason['exposure'],
-          t,
-        )!;
-
         return Stack(
           children: [
             Positioned.fill(
-              child: Container(
-                decoration: BoxDecoration(
-                  gradient: RadialGradient(
-                    center: Alignment.center,
-                    radius: 1.5,
-                    colors: colors,
-                  ),
-                ),
-              ),
-            ),
+                child: Container(
+                    decoration: BoxDecoration(
+                        gradient: RadialGradient(
+                            center: Alignment.center,
+                            radius: 1.5,
+                            colors: colors)))),
             Positioned.fill(
-              child: Opacity(
-                opacity: isMobile ? 0.3 : 0.8,
+              child: IgnorePointer(
                 child: ModelViewer(
                   key: const ValueKey('fcm_house_model_stable'),
                   backgroundColor: Colors.transparent,
@@ -255,86 +267,45 @@ class _LoginScreenState extends State<LoginScreen>
                   autoPlay: true,
                   cameraControls: false,
                   disableZoom: true,
-                  exposure: exposure,
-                  shadowIntensity: 1.0,
-                  shadowSoftness: 0.0,
+                  exposure: 0.8, // Slightly lower to avoid aliasing artifacts
+                  shadowIntensity: 0.2, // Very subtle to keep it Zen
+                  shadowSoftness: 1.0, // Soft for stability
                   rotationPerSecond: '10deg',
                   cameraTarget: 'auto 1m auto',
                   cameraOrbit: '45deg 75deg 80%',
                 ),
               ),
             ),
-            Positioned.fill(
-              child: IgnorePointer(
-                child: Opacity(
-                  opacity: _isTransitioning ? (1.0 - t) : 0.0,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      gradient: RadialGradient(
-                        colors: [
-                          previousSeason['accent'].withOpacity(0.25),
-                          Colors.transparent,
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            Positioned.fill(
-              child: IgnorePointer(
-                child: Opacity(
-                  opacity: _isTransitioning ? t : 1.0,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      gradient: RadialGradient(
-                        colors: [
-                          currentSeason['accent'].withOpacity(0.25),
-                          Colors.transparent,
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            Positioned.fill(
-              child: Opacity(
-                opacity: _isTransitioning ? (1.0 - t) : 0.0,
-                child: _buildWeatherEffect(
-                  previousSeason['weather'],
-                  previousSeason['accent'],
-                ),
-              ),
-            ),
-            Positioned.fill(
-              child: Opacity(
-                opacity: _isTransitioning ? t : 1.0,
-                child: _buildWeatherEffect(
-                  currentSeason['weather'],
-                  currentSeason['accent'],
-                ),
-              ),
-            ),
+            _buildWeatherLayer(
+                previousSeason['weather'], previousSeason['accent'], 1.0 - t),
+            _buildWeatherLayer(
+                currentSeason['weather'], currentSeason['accent'], t),
           ],
         );
       },
     );
   }
 
+  Widget _buildWeatherLayer(String type, Color color, double opacity) {
+    return Positioned.fill(
+        child: Opacity(
+            opacity: _isTransitioning
+                ? opacity.clamp(0, 1)
+                : (opacity > 0.5 ? 1.0 : 0.0),
+            child: _buildWeatherEffect(type, color)));
+  }
+
   Widget _buildWeatherEffect(String type, Color color) {
     return IgnorePointer(
-      child: AnimatedBuilder(
-        animation: _weatherController,
-        builder: (context, child) {
-          return CustomPaint(
-            painter: WeatherPainter(
-              type: type,
-              color: color,
-              progress: _weatherController.value,
-            ),
-          );
-        },
+      child: RepaintBoundary(
+        child: AnimatedBuilder(
+          animation: _weatherController,
+          builder: (context, child) => CustomPaint(
+              painter: WeatherPainter(
+                  type: type,
+                  color: color,
+                  progress: _weatherController.value)),
+        ),
       ),
     );
   }
@@ -345,9 +316,8 @@ class _LoginScreenState extends State<LoginScreen>
         Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            border: Border.all(color: accentGold.withOpacity(0.5), width: 1),
-            borderRadius: BorderRadius.circular(8),
-          ),
+              border: Border.all(color: accentGold.withOpacity(0.5), width: 1),
+              borderRadius: BorderRadius.circular(8)),
           child: const Icon(Icons.shield_rounded, color: accentGold, size: 24),
         ),
         const SizedBox(width: 14),
@@ -383,28 +353,28 @@ class _LoginScreenState extends State<LoginScreen>
         height: 70,
         child: AnimatedSwitcher(
           duration: const Duration(milliseconds: 600),
-          transitionBuilder: (child, animation) {
-            return FadeTransition(opacity: animation, child: child);
-          },
+          transitionBuilder: (child, animation) =>
+              FadeTransition(opacity: animation, child: child),
           child: Row(
             key: ValueKey(_currentFeatureIndex),
             children: [
               Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  color: accentGold.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: accentGold.withOpacity(0.3)),
-                ),
-                child: Icon(feature['icon'], color: accentGold, size: 26),
-              ),
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                      color: accentGold.withOpacity(0.05), // Reduced from 0.1
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                          color: accentGold
+                              .withOpacity(0.15))), // Reduced from 0.3
+                  child: Icon(feature['icon'],
+                      color: accentGold.withOpacity(0.8), size: 26)),
               const SizedBox(width: 16),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
                     Text(feature['title'],
                         style: GoogleFonts.playfairDisplay(
                             fontSize: 17,
@@ -413,10 +383,8 @@ class _LoginScreenState extends State<LoginScreen>
                     const SizedBox(height: 4),
                     Text(feature['desc'],
                         style: GoogleFonts.outfit(
-                            fontSize: 12, color: Colors.white54)),
-                  ],
-                ),
-              ),
+                            fontSize: 12, color: Colors.white54))
+                  ])),
             ],
           ),
         ),
@@ -427,19 +395,30 @@ class _LoginScreenState extends State<LoginScreen>
   Widget _buildAccessButton() {
     return MouseRegion(
       cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _isAccessButtonHovered = true),
+      onExit: (_) => setState(() => _isAccessButtonHovered = false),
       child: GestureDetector(
         onTap: () => setState(() => _isPanelOpen = true),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOutCubic,
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+          transform: Matrix4.identity()
+            ..scale(_isAccessButtonHovered ? 1.05 : 1.0),
           decoration: BoxDecoration(
-            gradient: const LinearGradient(colors: [deepGold, accentGold]),
+            gradient: LinearGradient(
+              colors: _isAccessButtonHovered
+                  ? [accentGold, deepGold]
+                  : [deepGold, accentGold],
+            ),
             borderRadius: BorderRadius.circular(30),
             boxShadow: [
               BoxShadow(
-                  color: accentGold.withOpacity(0.3),
-                  blurRadius: 20,
-                  offset: const Offset(0, 8)),
+                color:
+                    accentGold.withOpacity(_isAccessButtonHovered ? 0.6 : 0.3),
+                blurRadius: _isAccessButtonHovered ? 25 : 20,
+                offset: Offset(0, _isAccessButtonHovered ? 10 : 8),
+              ),
             ],
           ),
           child: Row(
@@ -463,37 +442,48 @@ class _LoginScreenState extends State<LoginScreen>
   Widget _buildPanel(bool isMobile) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.5),
-        border: Border(
-            left: BorderSide(color: Colors.white.withAlpha(20), width: 1)),
-      ),
+          color: Colors.black.withOpacity(0.5),
+          border: Border(
+              left: BorderSide(color: Colors.white.withAlpha(20), width: 1))),
       child: ClipRect(
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 50, sigmaY: 50),
-          child: Stack(
-            children: [
-              if (!isMobile)
-                Positioned(
-                  top: 32,
-                  right: 32,
-                  child: IconButton(
-                    onPressed: () => setState(() => _isPanelOpen = false),
-                    icon: const Icon(Icons.close_rounded,
-                        color: Colors.white30, size: 24),
-                    style: IconButton.styleFrom(
-                        backgroundColor: Colors.white.withOpacity(0.05)),
+          filter:
+              ImageFilter.blur(sigmaX: 15, sigmaY: 15), // Reduced for stability
+          child: Container(
+            color: Colors.black.withOpacity(0.4), // Darker overlay fallback
+            child: Stack(
+              children: [
+                if (!isMobile)
+                  Positioned(
+                    top: 32,
+                    right: 32,
+                    child: IconButton(
+                      onPressed: () => setState(() => _isPanelOpen = false),
+                      icon: const Icon(Icons.close_rounded,
+                          color: Colors.white30, size: 24),
+                      style: IconButton.styleFrom(
+                          backgroundColor: Colors.white.withOpacity(0.05)),
+                    ),
+                  ),
+                Center(
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 300),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    child: SingleChildScrollView(
+                      key: ValueKey(_isLoginMode),
+                      padding: const EdgeInsets.symmetric(horizontal: 60),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 360),
+                        child: _isLoginMode
+                            ? _buildLoginForm()
+                            : _buildRegisterForm(),
+                      ),
+                    ),
                   ),
                 ),
-              Center(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(horizontal: 60),
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 360),
-                    child: _buildLoginForm(),
-                  ),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -502,7 +492,7 @@ class _LoginScreenState extends State<LoginScreen>
 
   Widget _buildLoginForm() {
     return Form(
-      key: _formKey,
+      key: _loginFormKey,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -521,29 +511,81 @@ class _LoginScreenState extends State<LoginScreen>
               isPassword: true),
           const SizedBox(height: 16),
           Align(
-            alignment: Alignment.centerRight,
-            child: TextButton(
-                onPressed: () {},
-                child: const Text('Forgot password?',
-                    style: TextStyle(color: accentGold, fontSize: 13))),
-          ),
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                  onPressed: () {},
+                  child: const Text('Forgot password?',
+                      style: TextStyle(color: accentGold, fontSize: 13)))),
           const SizedBox(height: 40),
           _buildPrimaryButton('Sign In'),
           const SizedBox(height: 32),
-          Center(
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text('Don\'t have an account?',
-                    style: TextStyle(color: Colors.white38, fontSize: 13)),
-                TextButton(
-                    onPressed: () => Navigator.pushNamed(context, '/register'),
-                    child: const Text('Sign Up',
-                        style: TextStyle(
-                            color: accentGold,
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold))),
-              ],
+          _buildSwitchMode('Don\'t have an account?', 'Sign Up',
+              () => setState(() => _isLoginMode = false)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRegisterForm() {
+    return Form(
+      key: _registerFormKey,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Sign Up',
+              style: GoogleFonts.playfairDisplay(
+                  fontSize: 36,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white)),
+          const SizedBox(height: 8),
+          Text('Create an account to start managing assets.',
+              style: GoogleFonts.outfit(fontSize: 14, color: Colors.white54)),
+          const SizedBox(height: 48),
+          _buildField('Full Name', _nameController, Icons.person_outline),
+          const SizedBox(height: 24),
+          _buildField('Email', _emailController, Icons.email_outlined),
+          const SizedBox(height: 24),
+          _buildField('Password', _passwordController, Icons.lock_outline,
+              isPassword: true),
+          const SizedBox(height: 40),
+          _buildPrimaryButton('Sign Up'),
+          const SizedBox(height: 32),
+          _buildSwitchMode('Already have an account?', 'Sign In',
+              () => setState(() => _isLoginMode = true)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSwitchMode(String text, String action, VoidCallback onTap) {
+    return Center(
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(text,
+              style: const TextStyle(color: Colors.white38, fontSize: 13)),
+          MouseRegion(
+            onEnter: (_) => setState(() => _isSwitchHovered = true),
+            onExit: (_) => setState(() => _isSwitchHovered = false),
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: onTap,
+              child: AnimatedDefaultTextStyle(
+                duration: const Duration(milliseconds: 200),
+                style: TextStyle(
+                  color: _isSwitchHovered ? Colors.white : accentGold,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  decoration: _isSwitchHovered
+                      ? TextDecoration.underline
+                      : TextDecoration.none,
+                ),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  child: Text(action),
+                ),
+              ),
             ),
           ),
         ],
@@ -565,10 +607,9 @@ class _LoginScreenState extends State<LoginScreen>
         const SizedBox(height: 10),
         Container(
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.05),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.white.withOpacity(0.08)),
-          ),
+              color: Colors.white.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white.withOpacity(0.08))),
           child: TextFormField(
             controller: controller,
             obscureText: isPassword && !_isPasswordVisible,
@@ -589,8 +630,7 @@ class _LoginScreenState extends State<LoginScreen>
                           color: Colors.white24,
                           size: 18),
                       onPressed: () => setState(
-                          () => _isPasswordVisible = !_isPasswordVisible),
-                    )
+                          () => _isPasswordVisible = !_isPasswordVisible))
                   : null,
             ),
           ),
@@ -607,37 +647,35 @@ class _LoginScreenState extends State<LoginScreen>
         duration: const Duration(milliseconds: 300),
         height: 56,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          gradient: LinearGradient(
-              colors: _isButtonHovered
-                  ? [accentGold, deepGold]
-                  : [deepGold, accentGold]),
-          boxShadow: [
-            BoxShadow(
-                color: accentGold.withOpacity(_isButtonHovered ? 0.4 : 0.15),
-                blurRadius: _isButtonHovered ? 30 : 15,
-                offset: const Offset(0, 8))
-          ],
-        ),
+            borderRadius: BorderRadius.circular(12),
+            gradient: LinearGradient(
+                colors: _isButtonHovered
+                    ? [accentGold, deepGold]
+                    : [deepGold, accentGold]),
+            boxShadow: [
+              BoxShadow(
+                  color: accentGold.withOpacity(_isButtonHovered ? 0.4 : 0.15),
+                  blurRadius: _isButtonHovered ? 30 : 15,
+                  offset: const Offset(0, 8))
+            ]),
         child: Material(
           color: Colors.transparent,
           child: InkWell(
-            onTap: _login,
+            onTap: _handleAuth,
             borderRadius: BorderRadius.circular(12),
             child: Center(
-              child: _isLoading
-                  ? const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(
-                          color: Colors.black, strokeWidth: 2))
-                  : Text(text,
-                      style: GoogleFonts.outfit(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.black,
-                          letterSpacing: 1)),
-            ),
+                child: _isLoading
+                    ? const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(
+                            color: Colors.black, strokeWidth: 2))
+                    : Text(text,
+                        style: GoogleFonts.outfit(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.black,
+                            letterSpacing: 1))),
           ),
         ),
       ),
@@ -645,7 +683,6 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Widget _buildHeroTagline() {
-    final season = _seasons[_currentSeasonIndex];
     return Positioned(
       top: 140,
       right: 60,
@@ -653,39 +690,22 @@ class _LoginScreenState extends State<LoginScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                      color: season['accent'], shape: BoxShape.circle)),
-              const SizedBox(width: 8),
-              Text('${season['name']} - ${season['label']}',
-                  style: GoogleFonts.outfit(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w900,
-                      color: season['accent'],
-                      letterSpacing: 2)),
-            ],
-          ),
-          const SizedBox(height: 12),
           Text('Manage Your Property,',
               textAlign: TextAlign.right,
               style: GoogleFonts.playfairDisplay(
                   fontSize: 48,
                   fontWeight: FontWeight.w600,
                   color: Colors.white,
-                  height: 1.1)),
+                  height: 1.15)), // Tuned to 1.15 for cohesion
           Text('Effortlessly.',
               textAlign: TextAlign.right,
               style: GoogleFonts.playfairDisplay(
                   fontSize: 48,
                   fontWeight: FontWeight.w600,
                   color: accentGold,
-                  height: 1.1)),
-          const SizedBox(height: 16),
+                  height: 1.15)), // Tuned to 1.15 for cohesion
+          const SizedBox(
+              height: 24), // Increased gap to separate hook from info
           Text(
               'One platform, complete control. Monitor repairs and manage assets with precision.',
               textAlign: TextAlign.right,
@@ -696,11 +716,39 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
+  Widget _buildSeasonStatus() {
+    final season = _seasons[_currentSeasonIndex];
+    return Positioned(
+      bottom: 60,
+      right: 60,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          Container(
+              width: 6,
+              height: 6,
+              decoration: BoxDecoration(
+                  color: season['accent'].withOpacity(0.8),
+                  shape: BoxShape.circle)),
+          const SizedBox(width: 10),
+          Text('${season['name']} — ${season['label']}',
+              style: GoogleFonts.outfit(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w900,
+                  color: season['accent'].withOpacity(0.8),
+                  letterSpacing: 2)),
+        ],
+      ),
+    );
+  }
+
   Widget _buildGeometricAccents() {
     return Positioned.fill(
       child: IgnorePointer(
-        child: CustomPaint(
-            painter: GeometricAccentPainter(accentGold.withOpacity(0.15))),
+        child: RepaintBoundary(
+          child: CustomPaint(
+              painter: GeometricAccentPainter(accentGold.withOpacity(0.15))),
+        ),
       ),
     );
   }
